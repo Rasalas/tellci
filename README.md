@@ -69,7 +69,7 @@ Install a specific release or directory:
 
 ```bash
 curl -fsSL https://github.com/Rasalas/tellci/releases/latest/download/install.sh \
-  | TELLCI_VERSION=v0.1.0 TELLCI_INSTALL_DIR="$HOME/.local/bin" sh
+  | TELLCI_VERSION=v0.1.1 TELLCI_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 From source:
@@ -90,8 +90,8 @@ Tagged releases publish Linux, macOS, and Windows binaries to GitHub Releases.
 To publish a release:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 ## Commands
