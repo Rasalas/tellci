@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use tellci::{AddOptions, DEFAULT_CLASS, DEFAULT_FILE, DEFAULT_SUITE};
+use tellci::{AddOptions, CiProvider, DEFAULT_CLASS, DEFAULT_FILE, DEFAULT_SUITE};
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Write simple CI feedback as JUnit XML")]
@@ -69,6 +69,9 @@ struct FailCommand {
 
 #[derive(Debug, Parser)]
 struct FinishCommand {
+    #[arg(long, help = "Auto-detect CI provider and enable native reporting")]
+    ci: bool,
+
     #[arg(long, help = "Write a GitHub Actions summary and emit annotations")]
     github: bool,
 
@@ -120,10 +123,13 @@ fn run() -> Result<u8> {
         }
         Command::Finish(command) => {
             let status = tellci::finish(&cli.file)?;
-            if command.github || command.github_summary {
+            let github = command.github
+                || (command.ci && matches!(CiProvider::detect(), CiProvider::GitHub));
+
+            if github || command.github_summary {
                 write_github_summary(&cli.file)?;
             }
-            if command.github || command.github_annotations {
+            if github || command.github_annotations {
                 print!("{}", tellci::github_annotations(&cli.file)?);
             }
             Ok(if status.is_success() { 0 } else { 1 })

@@ -1,5 +1,5 @@
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 use anyhow::{Context, Result};
 use quick_xml::{de::from_str, se::Serializer};
@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 pub const DEFAULT_FILE: &str = "tellci.xml";
 pub const DEFAULT_SUITE: &str = "tellci";
 pub const DEFAULT_CLASS: &str = "tellci";
+pub const ENV_CI: &str = "CI";
+pub const ENV_GITHUB_ACTIONS: &str = "GITHUB_ACTIONS";
+pub const ENV_GITLAB_CI: &str = "GITLAB_CI";
+pub const ENV_CI_SERVER_NAME: &str = "CI_SERVER_NAME";
 
 #[derive(Debug, Clone)]
 pub struct AddOptions {
@@ -37,6 +41,38 @@ pub struct ReportStatus {
 impl ReportStatus {
     pub fn is_success(self) -> bool {
         self.failures == 0 && self.errors == 0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CiProvider {
+    GitHub,
+    GitLab,
+    Generic,
+    Local,
+}
+
+impl CiProvider {
+    pub fn detect() -> Self {
+        Self::detect_with(|key| env::var(key).ok())
+    }
+
+    fn detect_with(mut get: impl FnMut(&str) -> Option<String>) -> Self {
+        if is_truthy(get(ENV_GITHUB_ACTIONS).as_deref()) {
+            return Self::GitHub;
+        }
+
+        if is_truthy(get(ENV_GITLAB_CI).as_deref())
+            || get(ENV_CI_SERVER_NAME).as_deref() == Some("GitLab")
+        {
+            return Self::GitLab;
+        }
+
+        if is_truthy(get(ENV_CI).as_deref()) {
+            return Self::Generic;
+        }
+
+        Self::Local
     }
 }
 
@@ -91,6 +127,10 @@ fn default_suite_name() -> String {
 
 fn default_class_name() -> String {
     DEFAULT_CLASS.to_string()
+}
+
+fn is_truthy(value: Option<&str>) -> bool {
+    matches!(value, Some(value) if !value.is_empty() && value != "0" && !value.eq_ignore_ascii_case("false"))
 }
 
 impl TestSuite {
@@ -326,10 +366,36 @@ fn workflow_command_data(text: &str) -> String {
 mod tests {
     use super::*;
 
+    fn detect_from(values: &[(&str, &str)]) -> CiProvider {
+        CiProvider::detect_with(|key| {
+            values
+                .iter()
+                .find_map(|(candidate, value)| (*candidate == key).then(|| (*value).to_string()))
+        })
+    }
+
     fn report_path() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("tellci.xml");
         (dir, path)
+    }
+
+    #[test]
+    fn ci_provider_detection_prefers_specific_providers() {
+        assert_eq!(detect_from(&[(ENV_CI, "true")]), CiProvider::Generic);
+        assert_eq!(
+            detect_from(&[(ENV_GITHUB_ACTIONS, "true")]),
+            CiProvider::GitHub
+        );
+        assert_eq!(detect_from(&[(ENV_GITLAB_CI, "true")]), CiProvider::GitLab);
+        assert_eq!(
+            detect_from(&[(ENV_CI, "true"), (ENV_CI_SERVER_NAME, "GitLab")]),
+            CiProvider::GitLab
+        );
+        assert_eq!(
+            detect_from(&[(ENV_GITHUB_ACTIONS, "false")]),
+            CiProvider::Local
+        );
     }
 
     #[test]
