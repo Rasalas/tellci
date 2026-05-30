@@ -161,6 +161,9 @@ Actions, it will:
 - emit GitHub error annotations for failed testcases
 - keep the regular `finish` exit-code behavior
 
+The summary contains the overall status, report counters, a findings table
+when checks fail, and an expandable list of passed checks.
+
 Use `tellci finish --github` when you want to force GitHub-style output.
 
 ```yaml

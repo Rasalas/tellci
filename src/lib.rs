@@ -181,6 +181,10 @@ impl TestSuite {
             .saturating_sub(self.errors)
             .saturating_sub(self.skipped)
     }
+
+    fn is_success(&self) -> bool {
+        self.failures == 0 && self.errors == 0
+    }
 }
 
 pub fn pass(path: &Path, message: impl Into<String>, options: AddOptions) -> Result<ReportStatus> {
@@ -294,32 +298,92 @@ fn save(path: &Path, mut suite: TestSuite) -> Result<ReportStatus> {
 fn render_github_markdown(suite: &TestSuite) -> String {
     let mut markdown = String::new();
     markdown.push_str("### tellci\n\n");
-    markdown.push_str("| Result | Count |\n");
+
+    if suite.is_success() {
+        markdown.push_str("**Status:** Passed\n\n");
+        markdown.push_str(&format!("All {} checks passed.\n\n", suite.tests));
+    } else {
+        markdown.push_str("**Status:** Failed\n\n");
+        markdown.push_str(&format!(
+            "{} of {} checks need attention.\n\n",
+            suite.failures + suite.errors,
+            suite.tests
+        ));
+    }
+
+    markdown.push_str("| Metric | Count |\n");
     markdown.push_str("| --- | ---: |\n");
-    markdown.push_str(&format!("| Tests | {} |\n", suite.tests));
+    markdown.push_str(&format!("| Total | {} |\n", suite.tests));
     markdown.push_str(&format!("| Passed | {} |\n", suite.passed()));
     markdown.push_str(&format!("| Failures | {} |\n", suite.failures));
     markdown.push_str(&format!("| Errors | {} |\n", suite.errors));
     markdown.push_str(&format!("| Skipped | {} |\n", suite.skipped));
 
-    let failures = suite
+    let findings = suite
         .testcases
         .iter()
-        .filter_map(|testcase| testcase.failure.as_ref().map(|failure| (testcase, failure)))
+        .filter_map(testcase_finding)
         .collect::<Vec<_>>();
 
-    if !failures.is_empty() {
-        markdown.push_str("\n#### Failures\n\n");
-        for (testcase, failure) in failures {
-            markdown.push_str(&format!("- **{}**", markdown_text(&testcase.name)));
-            if !failure.body.is_empty() && failure.body != failure.message {
-                markdown.push_str(&format!(": {}", markdown_text(&failure.body)));
-            }
-            markdown.push('\n');
+    if !findings.is_empty() {
+        markdown.push_str("\n#### Findings\n\n");
+        markdown.push_str("| Type | Class | Check | Details |\n");
+        markdown.push_str("| --- | --- | --- | --- |\n");
+        for (testcase, kind, text) in findings {
+            markdown.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                kind,
+                markdown_table_text(&testcase.classname),
+                markdown_table_text(&testcase.name),
+                markdown_table_text(report_text_body(text))
+            ));
         }
     }
 
+    let passed = suite
+        .testcases
+        .iter()
+        .filter(|testcase| testcase.failure.is_none() && testcase.error.is_none())
+        .collect::<Vec<_>>();
+
+    if !passed.is_empty() {
+        markdown.push_str(&format!(
+            "\n<details>\n<summary>Passed checks ({})</summary>\n\n",
+            passed.len()
+        ));
+        markdown.push_str("| Class | Check |\n");
+        markdown.push_str("| --- | --- |\n");
+        for testcase in passed {
+            markdown.push_str(&format!(
+                "| {} | {} |\n",
+                markdown_table_text(&testcase.classname),
+                markdown_table_text(&testcase.name)
+            ));
+        }
+        markdown.push_str("\n</details>\n");
+    }
+
     markdown
+}
+
+fn testcase_finding(testcase: &TestCase) -> Option<(&TestCase, &'static str, &ReportText)> {
+    if let Some(failure) = &testcase.failure {
+        return Some((testcase, "Failure", failure));
+    }
+
+    if let Some(error) = &testcase.error {
+        return Some((testcase, "Error", error));
+    }
+
+    None
+}
+
+fn report_text_body(text: &ReportText) -> &str {
+    if text.body.is_empty() {
+        &text.message
+    } else {
+        &text.body
+    }
 }
 
 fn render_github_annotations(suite: &TestSuite) -> String {
@@ -346,8 +410,17 @@ fn render_github_annotations(suite: &TestSuite) -> String {
     annotations
 }
 
-fn markdown_text(text: &str) -> String {
-    text.replace('|', "\\|").replace('\n', "<br>")
+fn markdown_table_text(text: &str) -> String {
+    html_escape(text)
+        .replace('|', "\\|")
+        .replace('\r', "")
+        .replace('\n', "<br>")
+}
+
+fn html_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn workflow_command_property(text: &str) -> String {
@@ -536,11 +609,51 @@ mod tests {
 
         let markdown = github_markdown(&path).unwrap();
 
-        assert!(markdown.contains("| Tests | 2 |"));
+        assert!(markdown.contains("**Status:** Failed"));
+        assert!(markdown.contains("1 of 2 checks need attention."));
+        assert!(markdown.contains("| Total | 2 |"));
         assert!(markdown.contains("| Passed | 1 |"));
         assert!(markdown.contains("| Failures | 1 |"));
+        assert!(markdown.contains("#### Findings"));
+        assert!(markdown.contains("| Failure | tellci | Expected LICENSE \\| file to exist |"));
         assert!(markdown.contains("Expected LICENSE \\| file to exist"));
         assert!(markdown.contains("No LICENSE file was found<br>Add one."));
+        assert!(markdown.contains("<summary>Passed checks (1)</summary>"));
+        assert!(markdown.contains("| tellci | README.md exists |"));
+    }
+
+    #[test]
+    fn github_markdown_summarizes_successful_report() {
+        let (_dir, path) = report_path();
+
+        pass(&path, "README.md exists", AddOptions::default()).unwrap();
+        pass(&path, "LICENSE exists", AddOptions::default()).unwrap();
+
+        let markdown = github_markdown(&path).unwrap();
+
+        assert!(markdown.contains("**Status:** Passed"));
+        assert!(markdown.contains("All 2 checks passed."));
+        assert!(markdown.contains("| Total | 2 |"));
+        assert!(markdown.contains("| Passed | 2 |"));
+        assert!(!markdown.contains("#### Findings"));
+        assert!(markdown.contains("<summary>Passed checks (2)</summary>"));
+    }
+
+    #[test]
+    fn github_markdown_escapes_html_in_table_content() {
+        let (_dir, path) = report_path();
+
+        pass(
+            &path,
+            "Expected <script>alert(1)</script>",
+            AddOptions::default(),
+        )
+        .unwrap();
+
+        let markdown = github_markdown(&path).unwrap();
+
+        assert!(markdown.contains("Expected &lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!markdown.contains("<script>alert(1)</script>"));
     }
 
     #[test]
