@@ -61,10 +61,16 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
       - name: Download artifacts
         uses: actions/download-artifact@v7
         with:
           path: dist
+
+      - name: Stage installer
+        run: cp install.sh dist/install.sh
 
       - name: Publish release
         env:

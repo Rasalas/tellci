@@ -56,15 +56,20 @@ The generated report looks like this:
 
 ## Installation
 
-Download the latest Linux binary in CI:
+Install the latest release:
 
 ```bash
-mkdir -p .bin
-curl -fsSL \
-  https://github.com/Rasalas/tellci/releases/latest/download/tellci-linux-x86_64 \
-  -o .bin/tellci
-chmod +x .bin/tellci
-export PATH="$PWD/.bin:$PATH"
+curl -fsSL https://github.com/Rasalas/tellci/releases/latest/download/install.sh | sh
+```
+
+The installer writes to `/usr/local/bin` when it can. Otherwise it falls back
+to `$HOME/.local/bin`.
+
+Install a specific release or directory:
+
+```bash
+curl -fsSL https://github.com/Rasalas/tellci/releases/latest/download/install.sh \
+  | TELLCI_VERSION=v0.1.0 TELLCI_INSTALL_DIR="$HOME/.local/bin" sh
 ```
 
 From source:
@@ -161,13 +166,7 @@ check:
   image: alpine:latest
   before_script:
     - apk add --no-cache curl
-    - mkdir -p .bin
-    - |
-      curl -fsSL \
-        https://github.com/Rasalas/tellci/releases/latest/download/tellci-linux-x86_64 \
-        -o .bin/tellci
-    - chmod +x .bin/tellci
-    - export PATH="$PWD/.bin:$PATH"
+    - curl -fsSL https://github.com/Rasalas/tellci/releases/latest/download/install.sh | sh
   script:
     - test -f README.md
       && tellci pass "README.md exists"
@@ -221,13 +220,7 @@ check:
   steps:
     - uses: actions/checkout@v6
     - name: Install tellci
-      run: |
-        mkdir -p .bin
-        curl -fsSL \
-          https://github.com/Rasalas/tellci/releases/latest/download/tellci-linux-x86_64 \
-          -o .bin/tellci
-        chmod +x .bin/tellci
-        echo "$PWD/.bin" >> "$GITHUB_PATH"
+      run: curl -fsSL https://github.com/Rasalas/tellci/releases/latest/download/install.sh | sudo sh
 
     - run: |
         test -f README.md \
