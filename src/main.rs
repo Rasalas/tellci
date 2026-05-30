@@ -1,7 +1,10 @@
-use std::path::PathBuf;
+use std::env;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tellci::{AddOptions, DEFAULT_CLASS, DEFAULT_FILE, DEFAULT_SUITE};
 
@@ -24,7 +27,7 @@ enum Command {
     Fail(FailCommand),
 
     /// Exit 1 when the report contains failures or errors.
-    Finish,
+    Finish(FinishCommand),
 
     /// Replace the report with an empty testsuite.
     Reset {
@@ -62,6 +65,18 @@ struct FailCommand {
 
     #[arg(long)]
     fatal: bool,
+}
+
+#[derive(Debug, Parser)]
+struct FinishCommand {
+    #[arg(long, help = "Write a GitHub Actions summary and emit annotations")]
+    github: bool,
+
+    #[arg(long, help = "Write a GitHub Actions job summary")]
+    github_summary: bool,
+
+    #[arg(long, help = "Emit GitHub Actions error annotations")]
+    github_annotations: bool,
 }
 
 fn main() -> ExitCode {
@@ -103,8 +118,14 @@ fn run() -> Result<u8> {
 
             Ok(if command.fatal { 1 } else { 0 })
         }
-        Command::Finish => {
+        Command::Finish(command) => {
             let status = tellci::finish(&cli.file)?;
+            if command.github || command.github_summary {
+                write_github_summary(&cli.file)?;
+            }
+            if command.github || command.github_annotations {
+                print!("{}", tellci::github_annotations(&cli.file)?);
+            }
             Ok(if status.is_success() { 0 } else { 1 })
         }
         Command::Reset { suite } => {
@@ -124,4 +145,22 @@ fn run() -> Result<u8> {
             Ok(0)
         }
     }
+}
+
+fn write_github_summary(path: &Path) -> Result<()> {
+    let markdown = tellci::github_markdown(path)?;
+
+    if let Ok(summary_path) = env::var("GITHUB_STEP_SUMMARY") {
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&summary_path)
+            .with_context(|| format!("failed to open GitHub step summary file {summary_path}"))?;
+        file.write_all(markdown.as_bytes())
+            .with_context(|| format!("failed to write GitHub step summary file {summary_path}"))?;
+    } else {
+        println!("{markdown}");
+    }
+
+    Ok(())
 }

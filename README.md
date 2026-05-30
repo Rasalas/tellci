@@ -88,6 +88,7 @@ Useful options:
 tellci pass "Message" --class "Documentation" --suite "Docs"
 tellci fail "Message" --details "Longer explanation"
 tellci fail "Blocker" --fatal
+tellci finish --github
 tellci --file reports/tellci.xml fail "Message"
 TELLCI_FILE=reports/tellci.xml tellci finish
 ```
@@ -149,12 +150,38 @@ check:
 
 ## GitHub Actions
 
-GitHub Actions does not display JUnit reports in pull requests the same way
-GitLab does, but `tellci` is still useful there:
+GitHub Actions can show `tellci` output through native job summaries and
+annotations.
 
-- collect several script-level findings before failing the job
-- upload `tellci.xml` as an artifact
-- use the same checks locally, in GitHub Actions, and in GitLab CI
+Use `tellci finish --github` to:
+
+- append a Markdown summary to `$GITHUB_STEP_SUMMARY`
+- emit GitHub error annotations for failed testcases
+- keep the regular `finish` exit-code behavior
+
+```yaml
+check:
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v6
+
+    - run: |
+        test -f README.md \
+          && tellci pass "README.md exists" \
+          || tellci fail "Expected README.md to exist"
+
+        grep -q "## Installation" README.md \
+          && tellci pass "README.md contains Installation section" \
+          || tellci fail "Expected README.md to contain ## Installation"
+
+        tellci finish --github
+
+    - if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: tellci-junit
+        path: tellci.xml
+```
 
 This repository dogfoods `tellci` in its own CI:
 
@@ -163,7 +190,8 @@ cargo build --release --locked
 ./scripts/ci-tellci.sh
 ```
 
-The workflow then uploads `tellci.xml` as an artifact.
+The workflow writes a GitHub job summary, emits annotations when checks fail,
+and uploads `tellci.xml` as an artifact.
 
 ## Development
 
@@ -194,7 +222,3 @@ Out of scope for the core MVP:
 - mandatory config files
 - a complex rendering phase
 - hidden network behavior
-
-## License
-
-MIT

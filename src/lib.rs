@@ -134,6 +134,13 @@ impl TestSuite {
             .filter(|testcase| testcase.skipped.is_some())
             .count();
     }
+
+    fn passed(&self) -> usize {
+        self.tests
+            .saturating_sub(self.failures)
+            .saturating_sub(self.errors)
+            .saturating_sub(self.skipped)
+    }
 }
 
 pub fn pass(path: &Path, message: impl Into<String>, options: AddOptions) -> Result<ReportStatus> {
@@ -173,6 +180,18 @@ pub fn fail(path: &Path, message: impl Into<String>, options: AddOptions) -> Res
 pub fn finish(path: &Path) -> Result<ReportStatus> {
     let suite = load_or_empty(path, None)?;
     save(path, suite)
+}
+
+pub fn github_markdown(path: &Path) -> Result<String> {
+    let mut suite = load_or_empty(path, None)?;
+    suite.recalculate();
+    Ok(render_github_markdown(&suite))
+}
+
+pub fn github_annotations(path: &Path) -> Result<String> {
+    let mut suite = load_or_empty(path, None)?;
+    suite.recalculate();
+    Ok(render_github_annotations(&suite))
 }
 
 pub fn reset(path: &Path, suite_name: Option<&str>) -> Result<ReportStatus> {
@@ -230,6 +249,77 @@ fn save(path: &Path, mut suite: TestSuite) -> Result<ReportStatus> {
     fs::write(path, xml)
         .with_context(|| format!("failed to write report file {}", path.display()))?;
     Ok(status)
+}
+
+fn render_github_markdown(suite: &TestSuite) -> String {
+    let mut markdown = String::new();
+    markdown.push_str("### tellci\n\n");
+    markdown.push_str("| Result | Count |\n");
+    markdown.push_str("| --- | ---: |\n");
+    markdown.push_str(&format!("| Tests | {} |\n", suite.tests));
+    markdown.push_str(&format!("| Passed | {} |\n", suite.passed()));
+    markdown.push_str(&format!("| Failures | {} |\n", suite.failures));
+    markdown.push_str(&format!("| Errors | {} |\n", suite.errors));
+    markdown.push_str(&format!("| Skipped | {} |\n", suite.skipped));
+
+    let failures = suite
+        .testcases
+        .iter()
+        .filter_map(|testcase| testcase.failure.as_ref().map(|failure| (testcase, failure)))
+        .collect::<Vec<_>>();
+
+    if !failures.is_empty() {
+        markdown.push_str("\n#### Failures\n\n");
+        for (testcase, failure) in failures {
+            markdown.push_str(&format!("- **{}**", markdown_text(&testcase.name)));
+            if !failure.body.is_empty() && failure.body != failure.message {
+                markdown.push_str(&format!(": {}", markdown_text(&failure.body)));
+            }
+            markdown.push('\n');
+        }
+    }
+
+    markdown
+}
+
+fn render_github_annotations(suite: &TestSuite) -> String {
+    let mut annotations = String::new();
+
+    for testcase in &suite.testcases {
+        if let Some(failure) = &testcase.failure {
+            annotations.push_str(&format!(
+                "::error title={}::{}\n",
+                workflow_command_property(&testcase.name),
+                workflow_command_data(&failure.body)
+            ));
+        }
+
+        if let Some(error) = &testcase.error {
+            annotations.push_str(&format!(
+                "::error title={}::{}\n",
+                workflow_command_property(&testcase.name),
+                workflow_command_data(&error.body)
+            ));
+        }
+    }
+
+    annotations
+}
+
+fn markdown_text(text: &str) -> String {
+    text.replace('|', "\\|").replace('\n', "<br>")
+}
+
+fn workflow_command_property(text: &str) -> String {
+    workflow_command_data(text)
+        .replace(':', "%3A")
+        .replace(',', "%2C")
+}
+
+fn workflow_command_data(text: &str) -> String {
+    text.replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
 }
 
 #[cfg(test)]
@@ -361,5 +451,51 @@ mod tests {
         let xml = fs::read_to_string(path).unwrap();
         assert!(xml.contains("<testsuite name=\"PHP\""));
         assert!(xml.contains("classname=\"Composer\""));
+    }
+
+    #[test]
+    fn github_markdown_summarizes_report() {
+        let (_dir, path) = report_path();
+
+        pass(&path, "README.md exists", AddOptions::default()).unwrap();
+        fail(
+            &path,
+            "Expected LICENSE | file to exist",
+            AddOptions {
+                details: Some("No LICENSE file was found\nAdd one.".to_string()),
+                ..AddOptions::default()
+            },
+        )
+        .unwrap();
+
+        let markdown = github_markdown(&path).unwrap();
+
+        assert!(markdown.contains("| Tests | 2 |"));
+        assert!(markdown.contains("| Passed | 1 |"));
+        assert!(markdown.contains("| Failures | 1 |"));
+        assert!(markdown.contains("Expected LICENSE \\| file to exist"));
+        assert!(markdown.contains("No LICENSE file was found<br>Add one."));
+    }
+
+    #[test]
+    fn github_annotations_escape_workflow_command_data() {
+        let (_dir, path) = report_path();
+
+        fail(
+            &path,
+            "Expected foo:bar,baz",
+            AddOptions {
+                details: Some("Actual: 50%\nMissing value".to_string()),
+                ..AddOptions::default()
+            },
+        )
+        .unwrap();
+
+        let annotations = github_annotations(&path).unwrap();
+
+        assert_eq!(
+            annotations,
+            "::error title=Expected foo%3Abar%2Cbaz::Actual: 50%25%0AMissing value\n"
+        );
     }
 }

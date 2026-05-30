@@ -73,3 +73,41 @@ fn all_passed_report_finishes_successfully() {
 
     assert!(finish_status.success());
 }
+
+#[test]
+fn github_finish_writes_summary_and_annotations() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = dir.path().join("tellci.xml");
+    let summary = dir.path().join("summary.md");
+
+    let fail_status = tellci()
+        .args([
+            "--file",
+            report.to_str().expect("utf-8 path"),
+            "fail",
+            "Expected README.md to contain ## Installation",
+        ])
+        .status()
+        .expect("run tellci fail");
+
+    assert!(fail_status.success());
+
+    let output = tellci()
+        .env("GITHUB_STEP_SUMMARY", &summary)
+        .args([
+            "--file",
+            report.to_str().expect("utf-8 path"),
+            "finish",
+            "--github",
+        ])
+        .output()
+        .expect("run tellci finish --github");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("::error title="));
+    assert!(
+        std::fs::read_to_string(summary)
+            .expect("summary")
+            .contains("### tellci")
+    );
+}
