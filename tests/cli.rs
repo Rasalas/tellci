@@ -132,6 +132,8 @@ fn ci_finish_auto_detects_github_actions() {
 
     let output = tellci()
         .env("GITHUB_ACTIONS", "true")
+        .env_remove("GITLAB_CI")
+        .env_remove("CI_SERVER_NAME")
         .env("GITHUB_STEP_SUMMARY", &summary)
         .args([
             "--file",
@@ -170,6 +172,7 @@ fn ci_finish_on_gitlab_keeps_junit_only() {
     assert!(fail_status.success());
 
     let output = tellci()
+        .env_remove("GITHUB_ACTIONS")
         .env("GITLAB_CI", "true")
         .env("GITHUB_STEP_SUMMARY", &summary)
         .args([
