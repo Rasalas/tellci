@@ -1,6 +1,6 @@
 [package]
 name = "tellci"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A tiny CLI for writing simple CI feedback as JUnit XML"
 license = "MIT"
