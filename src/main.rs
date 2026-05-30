@@ -2,6 +2,7 @@ use std::env;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
@@ -25,6 +26,15 @@ enum Command {
 
     /// Append a failed testcase. This exits 0 unless --fatal is used.
     Fail(FailCommand),
+
+    /// Append an errored testcase. This exits 0 unless --fatal is used.
+    Error(FailCommand),
+
+    /// Append a skipped testcase.
+    Skip(AddCommand),
+
+    /// Run a command and append pass or fail based on its exit status.
+    Run(RunCommand),
 
     /// Exit 1 when the report contains failures or errors.
     Finish(FinishCommand),
@@ -68,6 +78,26 @@ struct FailCommand {
 }
 
 #[derive(Debug, Parser)]
+struct RunCommand {
+    message: String,
+
+    #[arg(long = "class", default_value = DEFAULT_CLASS)]
+    class_name: String,
+
+    #[arg(long)]
+    suite: Option<String>,
+
+    #[arg(long)]
+    details: Option<String>,
+
+    #[arg(long)]
+    fatal: bool,
+
+    #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+    command: Vec<String>,
+}
+
+#[derive(Debug, Parser)]
 struct FinishCommand {
     #[arg(
         long,
@@ -88,9 +118,9 @@ struct FinishCommand {
 enum Platform {
     #[value(alias = "detect")]
     Auto,
-    #[value(name = "github", alias = "gh")]
+    #[value(name = "github", alias = "gh", alias = "ghub")]
     GitHub,
-    #[value(name = "gitlab", alias = "gl")]
+    #[value(name = "gitlab", alias = "gl", alias = "glab")]
     GitLab,
     #[value(alias = "gt")]
     Generic,
@@ -125,6 +155,7 @@ fn run() -> Result<u8> {
             Ok(0)
         }
         Command::Fail(command) => {
+            let fatal = command.fatal;
             tellci::fail(
                 &cli.file,
                 command.message,
@@ -134,8 +165,37 @@ fn run() -> Result<u8> {
                     details: command.details,
                 },
             )?;
+            Ok(if fatal { 1 } else { 0 })
+        }
+        Command::Error(command) => {
+            let fatal = command.fatal;
+            tellci::error(
+                &cli.file,
+                command.message,
+                AddOptions {
+                    suite: command.suite,
+                    class: command.class_name,
+                    details: command.details,
+                },
+            )?;
 
-            Ok(if command.fatal { 1 } else { 0 })
+            Ok(if fatal { 1 } else { 0 })
+        }
+        Command::Skip(command) => {
+            tellci::skip(
+                &cli.file,
+                command.message,
+                AddOptions {
+                    suite: command.suite,
+                    class: command.class_name,
+                    details: None,
+                },
+            )?;
+            Ok(0)
+        }
+        Command::Run(command) => {
+            let exit_code = run_command(&cli.file, command)?;
+            Ok(exit_code)
         }
         Command::Finish(command) => {
             let status = tellci::finish(&cli.file)?;
@@ -167,6 +227,118 @@ fn run() -> Result<u8> {
             Ok(0)
         }
     }
+}
+
+fn run_command(path: &Path, command: RunCommand) -> Result<u8> {
+    let (program, args) = command
+        .command
+        .split_first()
+        .context("missing command to run")?;
+    let output = ProcessCommand::new(program).args(args).output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            tellci::pass(
+                path,
+                command.message,
+                AddOptions {
+                    suite: command.suite,
+                    class: command.class_name,
+                    details: None,
+                },
+            )?;
+            Ok(0)
+        }
+        Ok(output) => {
+            let fatal = command.fatal;
+            tellci::fail(
+                path,
+                command.message,
+                AddOptions {
+                    suite: command.suite,
+                    class: command.class_name,
+                    details: Some(run_details(
+                        &command.command,
+                        output.status.code(),
+                        &output.stdout,
+                        &output.stderr,
+                        command.details.as_deref(),
+                    )),
+                },
+            )?;
+            Ok(if fatal { 1 } else { 0 })
+        }
+        Err(error) => {
+            let fatal = command.fatal;
+            tellci::error(
+                path,
+                command.message,
+                AddOptions {
+                    suite: command.suite,
+                    class: command.class_name,
+                    details: Some(format!(
+                        "Failed to start command `{}`: {error}",
+                        shell_words(&command.command)
+                    )),
+                },
+            )?;
+            Ok(if fatal { 1 } else { 0 })
+        }
+    }
+}
+
+fn run_details(
+    command: &[String],
+    exit_code: Option<i32>,
+    stdout: &[u8],
+    stderr: &[u8],
+    details: Option<&str>,
+) -> String {
+    let mut body = String::new();
+
+    if let Some(details) = details {
+        body.push_str(details);
+        body.push_str("\n\n");
+    }
+
+    body.push_str(&format!("Command: {}\n", shell_words(command)));
+    match exit_code {
+        Some(exit_code) => body.push_str(&format!("Exit code: {exit_code}\n")),
+        None => body.push_str("Exit code: terminated by signal\n"),
+    }
+
+    let stdout = String::from_utf8_lossy(stdout);
+    if !stdout.is_empty() {
+        body.push_str("\nstdout:\n");
+        body.push_str(stdout.trim_end());
+        body.push('\n');
+    }
+
+    let stderr = String::from_utf8_lossy(stderr);
+    if !stderr.is_empty() {
+        body.push_str("\nstderr:\n");
+        body.push_str(stderr.trim_end());
+        body.push('\n');
+    }
+
+    body
+}
+
+fn shell_words(command: &[String]) -> String {
+    command
+        .iter()
+        .map(|part| {
+            if part
+                .chars()
+                .all(|char| char.is_ascii_alphanumeric() || "-_./:=@".contains(char))
+            {
+                part.to_string()
+            } else {
+                format!("'{}'", part.replace('\'', "'\"'\"'"))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 impl Platform {

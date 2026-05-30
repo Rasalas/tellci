@@ -4,6 +4,10 @@ fn tellci() -> Command {
     Command::new(env!("CARGO_BIN_EXE_tellci"))
 }
 
+fn tellci_path() -> &'static str {
+    env!("CARGO_BIN_EXE_tellci")
+}
+
 #[test]
 fn fail_collects_and_finish_fails() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -101,10 +105,10 @@ fn platform_github_writes_summary_and_annotations() {
             report.to_str().expect("utf-8 path"),
             "finish",
             "--platform",
-            "github",
+            "ghub",
         ])
         .output()
-        .expect("run tellci finish --platform github");
+        .expect("run tellci finish --platform ghub");
 
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stdout).contains("::error title="));
@@ -178,14 +182,124 @@ fn platform_gitlab_keeps_junit_only() {
             report.to_str().expect("utf-8 path"),
             "finish",
             "--platform",
-            "gl",
+            "glab",
         ])
         .output()
-        .expect("run tellci finish --platform gl");
+        .expect("run tellci finish --platform glab");
 
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     assert!(!summary.exists());
+}
+
+#[test]
+fn skip_records_skipped_testcase() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = dir.path().join("tellci.xml");
+
+    let status = tellci()
+        .args([
+            "--file",
+            report.to_str().expect("utf-8 path"),
+            "skip",
+            "PHPStan skipped because vendor/ is missing",
+        ])
+        .status()
+        .expect("run tellci skip");
+
+    assert!(status.success());
+    let xml = std::fs::read_to_string(report).expect("report");
+    assert!(xml.contains("skipped=\"1\""));
+    assert!(xml.contains("<skipped message=\"PHPStan skipped because vendor/ is missing\"/>"));
+}
+
+#[test]
+fn error_records_error_and_finish_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = dir.path().join("tellci.xml");
+
+    let status = tellci()
+        .args([
+            "--file",
+            report.to_str().expect("utf-8 path"),
+            "error",
+            "Tool crashed",
+            "--details",
+            "Process could not be started",
+        ])
+        .status()
+        .expect("run tellci error");
+
+    assert!(status.success());
+
+    let finish_status = tellci()
+        .env_remove("GITHUB_ACTIONS")
+        .args(["--file", report.to_str().expect("utf-8 path"), "finish"])
+        .status()
+        .expect("run tellci finish");
+
+    assert_eq!(finish_status.code(), Some(1));
+    let xml = std::fs::read_to_string(report).expect("report");
+    assert!(xml.contains("errors=\"1\""));
+    assert!(xml.contains("<error message=\"Tool crashed\">Process could not be started</error>"));
+}
+
+#[test]
+fn run_records_pass_for_successful_command() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = dir.path().join("tellci.xml");
+
+    let status = tellci()
+        .args([
+            "--file",
+            report.to_str().expect("utf-8 path"),
+            "run",
+            "tellci version works",
+            "--",
+            tellci_path(),
+            "--version",
+        ])
+        .status()
+        .expect("run tellci run");
+
+    assert!(status.success());
+    let xml = std::fs::read_to_string(report).expect("report");
+    assert!(xml.contains("tests=\"1\""));
+    assert!(xml.contains("failures=\"0\""));
+    assert!(xml.contains("name=\"tellci version works\""));
+}
+
+#[test]
+fn run_records_failure_for_nonzero_command_without_failing_immediately() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = dir.path().join("tellci.xml");
+
+    let status = tellci()
+        .args([
+            "--file",
+            report.to_str().expect("utf-8 path"),
+            "run",
+            "invalid tellci command fails",
+            "--",
+            tellci_path(),
+            "not-a-command",
+        ])
+        .status()
+        .expect("run tellci run");
+
+    assert!(status.success());
+
+    let finish_status = tellci()
+        .env_remove("GITHUB_ACTIONS")
+        .args(["--file", report.to_str().expect("utf-8 path"), "finish"])
+        .status()
+        .expect("run tellci finish");
+
+    assert_eq!(finish_status.code(), Some(1));
+    let xml = std::fs::read_to_string(report).expect("report");
+    assert!(xml.contains("failures=\"1\""));
+    assert!(xml.contains("Command:"));
+    assert!(xml.contains("Exit code:"));
 }
 
 #[test]

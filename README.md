@@ -56,6 +56,17 @@ The generated report looks like this:
 
 ## Installation
 
+Download the latest Linux binary in CI:
+
+```bash
+mkdir -p .bin
+curl -fsSL \
+  https://github.com/Rasalas/tellci/releases/latest/download/tellci-linux-x86_64 \
+  -o .bin/tellci
+chmod +x .bin/tellci
+export PATH="$PWD/.bin:$PATH"
+```
+
 From source:
 
 ```bash
@@ -69,18 +80,31 @@ cargo build --release
 ./target/release/tellci --help
 ```
 
-When tagged releases are used, the release workflow builds Linux, macOS, and
-Windows binaries as GitHub Actions artifacts.
+Tagged releases publish Linux, macOS, and Windows binaries to GitHub Releases.
+
+To publish a release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ## Commands
 
 ```bash
 tellci pass "Message"
 tellci fail "Message"
+tellci error "Message"
+tellci skip "Message"
+tellci run "Message" -- command arg
 tellci finish
 tellci reset
 tellci status
 ```
+
+`tellci run` executes the command after `--` directly, without a shell. A zero
+exit status records a pass. A non-zero exit status records a failure. If the
+command cannot be started, `tellci` records an error.
 
 Useful options:
 
@@ -88,6 +112,8 @@ Useful options:
 tellci pass "Message" --class "Documentation" --suite "Docs"
 tellci fail "Message" --details "Longer explanation"
 tellci fail "Blocker" --fatal
+tellci error "Tool crashed" --fatal
+tellci run "Composer validate works" --fatal -- composer validate
 tellci finish --platform github
 tellci finish --platform none
 tellci --file reports/tellci.xml fail "Message"
@@ -101,6 +127,10 @@ TELLCI_FILE=reports/tellci.xml tellci finish
 | `tellci pass "Message"` | `0` | A passing testcase was appended. |
 | `tellci fail "Message"` | `0` | A failing testcase was appended, but collection continues. |
 | `tellci fail "Message" --fatal` | `1` | A failing testcase was appended and the command fails immediately. |
+| `tellci error "Message"` | `0` | An errored testcase was appended, but collection continues. |
+| `tellci skip "Message"` | `0` | A skipped testcase was appended. |
+| `tellci run "Message" -- command` | `0` | The command was recorded as pass or fail, and collection continues. |
+| `tellci run "Message" --fatal -- command` | `1` | The command failed or errored and the command exits immediately. |
 | `tellci finish` | `0` | The report contains no failures or errors. |
 | `tellci finish` | `1` | The report contains at least one failure or error. |
 | Any command with an I/O or XML error | `2` | The report could not be read, parsed, or written. |
@@ -129,6 +159,15 @@ TELLCI_FILE=reports/tellci.xml tellci finish
 check:
   stage: test
   image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+    - mkdir -p .bin
+    - |
+      curl -fsSL \
+        https://github.com/Rasalas/tellci/releases/latest/download/tellci-linux-x86_64 \
+        -o .bin/tellci
+    - chmod +x .bin/tellci
+    - export PATH="$PWD/.bin:$PATH"
   script:
     - test -f README.md
       && tellci pass "README.md exists"
@@ -173,13 +212,22 @@ tellci finish --platform generic
 tellci finish --platform none
 ```
 
-Short aliases are also accepted: `gh`, `gl`, and `gt`.
+Short aliases are also accepted: `gh`, `ghub`, `gl`, `glab`, `gt`, `off`, and
+`detect`.
 
 ```yaml
 check:
   runs-on: ubuntu-latest
   steps:
     - uses: actions/checkout@v6
+    - name: Install tellci
+      run: |
+        mkdir -p .bin
+        curl -fsSL \
+          https://github.com/Rasalas/tellci/releases/latest/download/tellci-linux-x86_64 \
+          -o .bin/tellci
+        chmod +x .bin/tellci
+        echo "$PWD/.bin" >> "$GITHUB_PATH"
 
     - run: |
         test -f README.md \
@@ -228,6 +276,8 @@ cargo build --release
 In scope:
 
 - appending passing and failing testcases
+- appending skipped and errored testcases
+- running simple commands and recording their result
 - producing JUnit-compatible XML
 - making the final CI decision with `tellci finish`
 - simple metadata such as suite, class, details, and output file

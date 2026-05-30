@@ -189,9 +189,7 @@ impl TestSuite {
 
 pub fn pass(path: &Path, message: impl Into<String>, options: AddOptions) -> Result<ReportStatus> {
     let mut suite = load_or_empty(path, options.suite.as_deref())?;
-    if let Some(suite_name) = options.suite {
-        suite.name = suite_name;
-    }
+    apply_suite_override(&mut suite, options.suite);
     suite.testcases.push(TestCase {
         classname: options.class,
         name: message.into(),
@@ -204,9 +202,7 @@ pub fn pass(path: &Path, message: impl Into<String>, options: AddOptions) -> Res
 
 pub fn fail(path: &Path, message: impl Into<String>, options: AddOptions) -> Result<ReportStatus> {
     let mut suite = load_or_empty(path, options.suite.as_deref())?;
-    if let Some(suite_name) = options.suite {
-        suite.name = suite_name;
-    }
+    apply_suite_override(&mut suite, options.suite);
 
     let message = message.into();
     let body = options.details.unwrap_or_else(|| message.clone());
@@ -217,6 +213,42 @@ pub fn fail(path: &Path, message: impl Into<String>, options: AddOptions) -> Res
         failure: Some(ReportText { message, body }),
         error: None,
         skipped: None,
+    });
+    save(path, suite)
+}
+
+pub fn error(path: &Path, message: impl Into<String>, options: AddOptions) -> Result<ReportStatus> {
+    let mut suite = load_or_empty(path, options.suite.as_deref())?;
+    apply_suite_override(&mut suite, options.suite);
+
+    let message = message.into();
+    let body = options.details.unwrap_or_else(|| message.clone());
+
+    suite.testcases.push(TestCase {
+        classname: options.class,
+        name: message.clone(),
+        failure: None,
+        error: Some(ReportText { message, body }),
+        skipped: None,
+    });
+    save(path, suite)
+}
+
+pub fn skip(path: &Path, message: impl Into<String>, options: AddOptions) -> Result<ReportStatus> {
+    let mut suite = load_or_empty(path, options.suite.as_deref())?;
+    apply_suite_override(&mut suite, options.suite);
+
+    let message = message.into();
+    let skipped_message = options.details.unwrap_or_else(|| message.clone());
+
+    suite.testcases.push(TestCase {
+        classname: options.class,
+        name: message,
+        failure: None,
+        error: None,
+        skipped: Some(Skipped {
+            message: skipped_message,
+        }),
     });
     save(path, suite)
 }
@@ -270,6 +302,12 @@ fn load_or_empty(path: &Path, suite_name: Option<&str>) -> Result<TestSuite> {
         .with_context(|| format!("failed to parse JUnit XML report {}", path.display()))?;
     suite.recalculate();
     Ok(suite)
+}
+
+fn apply_suite_override(suite: &mut TestSuite, suite_name: Option<String>) {
+    if let Some(suite_name) = suite_name {
+        suite.name = suite_name;
+    }
 }
 
 fn save(path: &Path, mut suite: TestSuite) -> Result<ReportStatus> {
@@ -505,6 +543,43 @@ mod tests {
         let finished = finish(&path).unwrap();
         assert_eq!(finished.failures, 1);
         assert!(!finished.is_success());
+    }
+
+    #[test]
+    fn error_appends_error_and_finish_fails() {
+        let (_dir, path) = report_path();
+
+        let status = error(
+            &path,
+            "Tool crashed",
+            AddOptions {
+                details: Some("The command could not be started".to_string()),
+                ..AddOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(status.tests, 1);
+        assert_eq!(status.errors, 1);
+        assert!(!finish(&path).unwrap().is_success());
+
+        let xml = fs::read_to_string(path).unwrap();
+        assert!(xml.contains("<error message=\"Tool crashed\">"));
+        assert!(xml.contains("The command could not be started"));
+    }
+
+    #[test]
+    fn skip_appends_skipped_testcase_without_failing_finish() {
+        let (_dir, path) = report_path();
+
+        let status = skip(&path, "PHPStan skipped", AddOptions::default()).unwrap();
+
+        assert_eq!(status.tests, 1);
+        assert_eq!(status.skipped, 1);
+        assert!(finish(&path).unwrap().is_success());
+
+        let xml = fs::read_to_string(path).unwrap();
+        assert!(xml.contains("<skipped message=\"PHPStan skipped\"/>"));
     }
 
     #[test]

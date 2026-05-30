@@ -38,6 +38,9 @@ fi
 help_output="$("$TELLCI_BIN" --help)"
 if grep -Eq "\bpass\b" <<<"$help_output" \
   && grep -Eq "\bfail\b" <<<"$help_output" \
+  && grep -Eq "\berror\b" <<<"$help_output" \
+  && grep -Eq "\bskip\b" <<<"$help_output" \
+  && grep -Eq "\brun\b" <<<"$help_output" \
   && grep -Eq "\bfinish\b" <<<"$help_output" \
   && grep -Eq "\breset\b" <<<"$help_output" \
   && grep -Eq "\bstatus\b" <<<"$help_output"; then
@@ -45,7 +48,9 @@ if grep -Eq "\bpass\b" <<<"$help_output" \
 else
   check_fail \
     "Expected CLI help to list supported commands" \
-    "The generated help output should mention pass, fail, finish, reset, and status."
+    "The generated help output should mention pass, fail, error, skip, run, finish, reset, and status."
 fi
+
+"$TELLCI_BIN" run "tellci version command works" --class "Project" -- "$TELLCI_BIN" --version
 
 "$TELLCI_BIN" finish
