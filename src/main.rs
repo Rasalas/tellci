@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use tellci::{AddOptions, CiProvider, DEFAULT_CLASS, DEFAULT_FILE, DEFAULT_SUITE};
 
 #[derive(Debug, Parser)]
@@ -69,17 +69,33 @@ struct FailCommand {
 
 #[derive(Debug, Parser)]
 struct FinishCommand {
-    #[arg(long, help = "Auto-detect CI provider and enable native reporting")]
-    ci: bool,
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = Platform::Auto,
+        help = "Select native CI reporting output"
+    )]
+    platform: Platform,
 
-    #[arg(long, help = "Write a GitHub Actions summary and emit annotations")]
-    github: bool,
-
-    #[arg(long, help = "Write a GitHub Actions job summary")]
+    #[arg(long, help = "Also write a GitHub Actions job summary")]
     github_summary: bool,
 
-    #[arg(long, help = "Emit GitHub Actions error annotations")]
+    #[arg(long, help = "Also emit GitHub Actions error annotations")]
     github_annotations: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum Platform {
+    #[value(alias = "detect")]
+    Auto,
+    #[value(name = "github", alias = "gh")]
+    GitHub,
+    #[value(name = "gitlab", alias = "gl")]
+    GitLab,
+    #[value(alias = "gt")]
+    Generic,
+    #[value(alias = "off")]
+    None,
 }
 
 fn main() -> ExitCode {
@@ -123,8 +139,8 @@ fn run() -> Result<u8> {
         }
         Command::Finish(command) => {
             let status = tellci::finish(&cli.file)?;
-            let github = command.github
-                || (command.ci && matches!(CiProvider::detect(), CiProvider::GitHub));
+            let platform = command.platform.detect();
+            let github = matches!(platform, Platform::GitHub);
 
             if github || command.github_summary {
                 write_github_summary(&cli.file)?;
@@ -149,6 +165,20 @@ fn run() -> Result<u8> {
                 status.skipped
             );
             Ok(0)
+        }
+    }
+}
+
+impl Platform {
+    fn detect(self) -> Self {
+        match self {
+            Self::Auto => match CiProvider::detect() {
+                CiProvider::GitHub => Self::GitHub,
+                CiProvider::GitLab => Self::GitLab,
+                CiProvider::Generic => Self::Generic,
+                CiProvider::Local => Self::None,
+            },
+            platform => platform,
         }
     }
 }

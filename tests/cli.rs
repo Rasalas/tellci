@@ -22,6 +22,7 @@ fn fail_collects_and_finish_fails() {
     assert!(fail_status.success());
 
     let finish_status = tellci()
+        .env_remove("GITHUB_ACTIONS")
         .args(["--file", report.to_str().expect("utf-8 path"), "finish"])
         .status()
         .expect("run tellci finish");
@@ -67,6 +68,7 @@ fn all_passed_report_finishes_successfully() {
     assert!(pass_status.success());
 
     let finish_status = tellci()
+        .env_remove("GITHUB_ACTIONS")
         .args(["--file", report.to_str().expect("utf-8 path"), "finish"])
         .status()
         .expect("run tellci finish");
@@ -75,7 +77,7 @@ fn all_passed_report_finishes_successfully() {
 }
 
 #[test]
-fn github_finish_writes_summary_and_annotations() {
+fn platform_github_writes_summary_and_annotations() {
     let dir = tempfile::tempdir().expect("tempdir");
     let report = dir.path().join("tellci.xml");
     let summary = dir.path().join("summary.md");
@@ -98,10 +100,11 @@ fn github_finish_writes_summary_and_annotations() {
             "--file",
             report.to_str().expect("utf-8 path"),
             "finish",
-            "--github",
+            "--platform",
+            "github",
         ])
         .output()
-        .expect("run tellci finish --github");
+        .expect("run tellci finish --platform github");
 
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stdout).contains("::error title="));
@@ -113,7 +116,7 @@ fn github_finish_writes_summary_and_annotations() {
 }
 
 #[test]
-fn ci_finish_auto_detects_github_actions() {
+fn finish_auto_detects_github_actions() {
     let dir = tempfile::tempdir().expect("tempdir");
     let report = dir.path().join("tellci.xml");
     let summary = dir.path().join("summary.md");
@@ -135,14 +138,9 @@ fn ci_finish_auto_detects_github_actions() {
         .env_remove("GITLAB_CI")
         .env_remove("CI_SERVER_NAME")
         .env("GITHUB_STEP_SUMMARY", &summary)
-        .args([
-            "--file",
-            report.to_str().expect("utf-8 path"),
-            "finish",
-            "--ci",
-        ])
+        .args(["--file", report.to_str().expect("utf-8 path"), "finish"])
         .output()
-        .expect("run tellci finish --ci");
+        .expect("run tellci finish");
 
     assert_eq!(output.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&output.stdout).contains("::error title="));
@@ -154,7 +152,7 @@ fn ci_finish_auto_detects_github_actions() {
 }
 
 #[test]
-fn ci_finish_on_gitlab_keeps_junit_only() {
+fn platform_gitlab_keeps_junit_only() {
     let dir = tempfile::tempdir().expect("tempdir");
     let report = dir.path().join("tellci.xml");
     let summary = dir.path().join("summary.md");
@@ -179,10 +177,47 @@ fn ci_finish_on_gitlab_keeps_junit_only() {
             "--file",
             report.to_str().expect("utf-8 path"),
             "finish",
-            "--ci",
+            "--platform",
+            "gl",
         ])
         .output()
-        .expect("run tellci finish --ci");
+        .expect("run tellci finish --platform gl");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(!summary.exists());
+}
+
+#[test]
+fn platform_none_disables_auto_detected_output() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = dir.path().join("tellci.xml");
+    let summary = dir.path().join("summary.md");
+
+    let fail_status = tellci()
+        .args([
+            "--file",
+            report.to_str().expect("utf-8 path"),
+            "fail",
+            "Expected README.md to contain ## Installation",
+        ])
+        .status()
+        .expect("run tellci fail");
+
+    assert!(fail_status.success());
+
+    let output = tellci()
+        .env("GITHUB_ACTIONS", "true")
+        .env("GITHUB_STEP_SUMMARY", &summary)
+        .args([
+            "--file",
+            report.to_str().expect("utf-8 path"),
+            "finish",
+            "--platform",
+            "none",
+        ])
+        .output()
+        .expect("run tellci finish --platform none");
 
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());

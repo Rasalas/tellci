@@ -88,8 +88,8 @@ Useful options:
 tellci pass "Message" --class "Documentation" --suite "Docs"
 tellci fail "Message" --details "Longer explanation"
 tellci fail "Blocker" --fatal
-tellci finish --ci
-tellci finish --github
+tellci finish --platform github
+tellci finish --platform none
 tellci --file reports/tellci.xml fail "Message"
 TELLCI_FILE=reports/tellci.xml tellci finish
 ```
@@ -154,8 +154,8 @@ check:
 GitHub Actions can show `tellci` output through native job summaries and
 annotations.
 
-Use `tellci finish --ci` to auto-detect the current CI provider. On GitHub
-Actions, it will:
+`tellci finish` auto-detects the current CI provider. On GitHub Actions, it
+will:
 
 - append a Markdown summary to `$GITHUB_STEP_SUMMARY`
 - emit GitHub error annotations for failed testcases
@@ -164,7 +164,16 @@ Actions, it will:
 The summary contains the overall status, report counters, a findings table
 when checks fail, and an expandable list of passed checks.
 
-Use `tellci finish --github` when you want to force GitHub-style output.
+Use `--platform` when you want to override detection:
+
+```bash
+tellci finish --platform github
+tellci finish --platform gitlab
+tellci finish --platform generic
+tellci finish --platform none
+```
+
+Short aliases are also accepted: `gh`, `gl`, and `gt`.
 
 ```yaml
 check:
@@ -181,7 +190,7 @@ check:
           && tellci pass "README.md contains Installation section" \
           || tellci fail "Expected README.md to contain ## Installation"
 
-        tellci finish --ci
+        tellci finish
 
     - if: always()
       uses: actions/upload-artifact@v7

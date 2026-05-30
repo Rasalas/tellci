@@ -48,4 +48,4 @@ else
     "The generated help output should mention pass, fail, finish, reset, and status."
 fi
 
-"$TELLCI_BIN" finish --ci
+"$TELLCI_BIN" finish
