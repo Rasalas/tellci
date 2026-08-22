@@ -25,13 +25,13 @@ enum Command {
     Pass(AddCommand),
 
     /// Append a failed testcase. This exits 0 unless --fatal is used.
-    Fail(FailCommand),
+    Fail(IssueCommand),
 
     /// Append an errored testcase. This exits 0 unless --fatal is used.
-    Error(FailCommand),
+    Error(IssueCommand),
 
     /// Append a skipped testcase.
-    Skip(AddCommand),
+    Skip(SkipCommand),
 
     /// Run a command and append pass or fail based on its exit status.
     Run(RunCommand),
@@ -61,7 +61,21 @@ struct AddCommand {
 }
 
 #[derive(Debug, Parser)]
-struct FailCommand {
+struct SkipCommand {
+    message: String,
+
+    #[arg(long = "class", default_value = DEFAULT_CLASS)]
+    class_name: String,
+
+    #[arg(long)]
+    suite: Option<String>,
+
+    #[arg(long, help = "Use as the skipped testcase message")]
+    details: Option<String>,
+}
+
+#[derive(Debug, Parser)]
+struct IssueCommand {
     message: String,
 
     #[arg(long = "class", default_value = DEFAULT_CLASS)]
@@ -77,21 +91,23 @@ struct FailCommand {
     fatal: bool,
 }
 
+impl IssueCommand {
+    fn into_parts(self) -> (String, AddOptions) {
+        (
+            self.message,
+            AddOptions {
+                suite: self.suite,
+                class: self.class_name,
+                details: self.details,
+            },
+        )
+    }
+}
+
 #[derive(Debug, Parser)]
 struct RunCommand {
-    message: String,
-
-    #[arg(long = "class", default_value = DEFAULT_CLASS)]
-    class_name: String,
-
-    #[arg(long)]
-    suite: Option<String>,
-
-    #[arg(long)]
-    details: Option<String>,
-
-    #[arg(long)]
-    fatal: bool,
+    #[command(flatten)]
+    issue: IssueCommand,
 
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<String>,
@@ -156,29 +172,14 @@ fn run() -> Result<u8> {
         }
         Command::Fail(command) => {
             let fatal = command.fatal;
-            tellci::fail(
-                &cli.file,
-                command.message,
-                AddOptions {
-                    suite: command.suite,
-                    class: command.class_name,
-                    details: command.details,
-                },
-            )?;
+            let (message, options) = command.into_parts();
+            tellci::fail(&cli.file, message, options)?;
             Ok(if fatal { 1 } else { 0 })
         }
         Command::Error(command) => {
             let fatal = command.fatal;
-            tellci::error(
-                &cli.file,
-                command.message,
-                AddOptions {
-                    suite: command.suite,
-                    class: command.class_name,
-                    details: command.details,
-                },
-            )?;
-
+            let (message, options) = command.into_parts();
+            tellci::error(&cli.file, message, options)?;
             Ok(if fatal { 1 } else { 0 })
         }
         Command::Skip(command) => {
@@ -188,7 +189,7 @@ fn run() -> Result<u8> {
                 AddOptions {
                     suite: command.suite,
                     class: command.class_name,
-                    details: None,
+                    details: command.details,
                 },
             )?;
             Ok(0)
@@ -199,7 +200,7 @@ fn run() -> Result<u8> {
         }
         Command::Finish(command) => {
             let status = tellci::finish(&cli.file)?;
-            let platform = command.platform.detect();
+            let platform = resolve_platform(command.platform);
             let github = matches!(platform, Platform::GitHub);
 
             if github || command.github_summary {
@@ -229,8 +230,8 @@ fn run() -> Result<u8> {
     }
 }
 
-fn run_command(path: &Path, command: RunCommand) -> Result<u8> {
-    let (program, args) = command
+fn run_command(path: &Path, run: RunCommand) -> Result<u8> {
+    let (program, args) = run
         .command
         .split_first()
         .context("missing command to run")?;
@@ -238,50 +239,32 @@ fn run_command(path: &Path, command: RunCommand) -> Result<u8> {
 
     match output {
         Ok(output) if output.status.success() => {
-            tellci::pass(
-                path,
-                command.message,
-                AddOptions {
-                    suite: command.suite,
-                    class: command.class_name,
-                    details: None,
-                },
-            )?;
+            let (message, mut options) = run.issue.into_parts();
+            options.details = None;
+            tellci::pass(path, message, options)?;
             Ok(0)
         }
         Ok(output) => {
-            let fatal = command.fatal;
-            tellci::fail(
-                path,
-                command.message,
-                AddOptions {
-                    suite: command.suite,
-                    class: command.class_name,
-                    details: Some(run_details(
-                        &command.command,
-                        output.status.code(),
-                        &output.stdout,
-                        &output.stderr,
-                        command.details.as_deref(),
-                    )),
-                },
-            )?;
+            let fatal = run.issue.fatal;
+            let (message, mut options) = run.issue.into_parts();
+            options.details = Some(run_details(
+                &run.command,
+                output.status.code(),
+                &output.stdout,
+                &output.stderr,
+                options.details.as_deref(),
+            ));
+            tellci::fail(path, message, options)?;
             Ok(if fatal { 1 } else { 0 })
         }
         Err(error) => {
-            let fatal = command.fatal;
-            tellci::error(
-                path,
-                command.message,
-                AddOptions {
-                    suite: command.suite,
-                    class: command.class_name,
-                    details: Some(format!(
-                        "Failed to start command `{}`: {error}",
-                        shell_words(&command.command)
-                    )),
-                },
-            )?;
+            let fatal = run.issue.fatal;
+            let (message, mut options) = run.issue.into_parts();
+            options.details = Some(format!(
+                "Failed to start command `{}`: {error}",
+                shell_words(&run.command)
+            ));
+            tellci::error(path, message, options)?;
             Ok(if fatal { 1 } else { 0 })
         }
     }
@@ -341,17 +324,15 @@ fn shell_words(command: &[String]) -> String {
         .join(" ")
 }
 
-impl Platform {
-    fn detect(self) -> Self {
-        match self {
-            Self::Auto => match CiProvider::detect() {
-                CiProvider::GitHub => Self::GitHub,
-                CiProvider::GitLab => Self::GitLab,
-                CiProvider::Generic => Self::Generic,
-                CiProvider::Local => Self::None,
-            },
-            platform => platform,
-        }
+fn resolve_platform(platform: Platform) -> Platform {
+    match platform {
+        Platform::Auto => match CiProvider::detect() {
+            CiProvider::GitHub => Platform::GitHub,
+            CiProvider::GitLab => Platform::GitLab,
+            CiProvider::Generic => Platform::Generic,
+            CiProvider::Local => Platform::None,
+        },
+        platform => platform,
     }
 }
 
