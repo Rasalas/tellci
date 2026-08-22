@@ -158,6 +158,18 @@ TELLCI_FILE=reports/tellci.xml tellci fail "Expected README.md to exist"
 TELLCI_FILE=reports/tellci.xml tellci finish
 ```
 
+## Suites and Concurrency
+
+A report file holds a single `<testsuite>` element. The `--suite` option renames
+that suite for the whole report; it does not split testcases into multiple
+suites. Testcases appended with different suite names end up under the name of
+the last used suite. Use separate report files (`--file` or `TELLCI_FILE`) when
+you need logically separate suites.
+
+Report updates are read-modify-write and not synchronized. Do not run multiple
+`tellci` commands against the same report file in parallel; appends would be
+lost.
+
 ## GitLab CI
 
 ```yaml
