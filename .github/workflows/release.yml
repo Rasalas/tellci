@@ -75,8 +75,18 @@ jobs:
       - name: Create checksums
         run: |
           cd dist
-          find . -type f ! -name SHA256SUMS -exec sha256sum {} \; | sed 's|\./||' | sort > SHA256SUMS
+          find . -mindepth 2 -type f -exec mv {} . \;
+          find . -mindepth 1 -type d -empty -delete
+          for file in *; do
+            sha256sum "$file"
+          done | sort > SHA256SUMS
           cat SHA256SUMS
+          for file in install.sh tellci-linux-x86_64 tellci-macos-aarch64 tellci-windows-x86_64.exe; do
+            grep -qE "^[0-9a-f]{64}  ${file}$" SHA256SUMS || {
+              echo "missing checksum entry for ${file}" >&2
+              exit 1
+            }
+          done
 
       - name: Publish release
         env:
