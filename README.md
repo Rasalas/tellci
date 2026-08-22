@@ -62,8 +62,17 @@ Install the latest release:
 curl -fsSL https://github.com/Rasalas/tellci/releases/latest/download/install.sh | sh
 ```
 
-The installer writes to `/usr/local/bin` when it can. Otherwise it falls back
-to `$HOME/.local/bin`.
+The installer verifies the download against the release's `SHA256SUMS` file and
+writes to `/usr/local/bin` when it can. Otherwise it falls back to
+`$HOME/.local/bin`.
+
+For CI pipelines, pin the version instead of using `latest`, so that a new
+release cannot change your pipeline behavior unexpectedly:
+
+```bash
+curl -fsSL https://github.com/Rasalas/tellci/releases/download/v0.1.1/install.sh \
+  | TELLCI_VERSION=v0.1.1 sh
+```
 
 Install a specific release or directory:
 
