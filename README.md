@@ -116,6 +116,7 @@ Useful options:
 ```bash
 tellci pass "Message" --class "Documentation" --suite "Docs"
 tellci fail "Message" --details "Longer explanation"
+tellci skip "Message" --details "Why this was skipped"
 tellci fail "Blocker" --fatal
 tellci error "Tool crashed" --fatal
 tellci run "Composer validate works" --fatal -- composer validate

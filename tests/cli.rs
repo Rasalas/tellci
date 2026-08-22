@@ -214,6 +214,28 @@ fn skip_records_skipped_testcase() {
 }
 
 #[test]
+fn skip_details_override_skipped_message() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let report = dir.path().join("tellci.xml");
+
+    let status = tellci()
+        .args([
+            "--file",
+            report.to_str().expect("utf-8 path"),
+            "skip",
+            "PHPStan skipped",
+            "--details",
+            "vendor/ directory is not present in CI",
+        ])
+        .status()
+        .expect("run tellci skip --details");
+
+    assert!(status.success());
+    let xml = std::fs::read_to_string(report).expect("report");
+    assert!(xml.contains("<skipped message=\"vendor/ directory is not present in CI\"/>"));
+}
+
+#[test]
 fn error_records_error_and_finish_fails() {
     let dir = tempfile::tempdir().expect("tempdir");
     let report = dir.path().join("tellci.xml");
