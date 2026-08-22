@@ -69,14 +69,16 @@ jobs:
         with:
           path: dist
 
-      - name: Stage installer
-        run: cp install.sh dist/install.sh
+      - name: Stage artifacts
+        run: |
+          mkdir release
+          cp install.sh release/
+          find dist -type f -exec cp {} release/ \;
+          ls -la release
 
       - name: Create checksums
+        working-directory: release
         run: |
-          cd dist
-          find . -mindepth 2 -type f -exec mv {} . \;
-          find . -mindepth 1 -type d -empty -delete
           for file in *; do
             sha256sum "$file"
           done | sort > SHA256SUMS
@@ -96,4 +98,4 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
-            $(find dist -type f | sort)
+            $(find release -type f | sort)
