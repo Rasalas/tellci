@@ -328,8 +328,16 @@ fn save(path: &Path, mut suite: TestSuite) -> Result<ReportStatus> {
         .serialize(serializer)
         .context("failed to serialize JUnit XML report")?;
     xml.push('\n');
-    fs::write(path, xml)
-        .with_context(|| format!("failed to write report file {}", path.display()))?;
+
+    let temp_path = path.with_extension("xml.tmp");
+    fs::write(&temp_path, &xml).with_context(|| {
+        format!(
+            "failed to write temporary report file {}",
+            temp_path.display()
+        )
+    })?;
+    fs::rename(&temp_path, path)
+        .with_context(|| format!("failed to replace report file {}", path.display()))?;
     Ok(status)
 }
 
@@ -645,6 +653,23 @@ mod tests {
         pass(&nested, "Nested report works", AddOptions::default()).unwrap();
 
         assert!(nested.exists());
+    }
+
+    #[test]
+    fn save_leaves_no_temporary_file_behind() {
+        let (_dir, path) = report_path();
+
+        pass(&path, "Atomic write works", AddOptions::default()).unwrap();
+
+        let entries: Vec<_> = path
+            .parent()
+            .unwrap()
+            .read_dir()
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name())
+            .collect();
+        assert_eq!(entries, vec![path.file_name().unwrap().to_owned()]);
     }
 
     #[test]
