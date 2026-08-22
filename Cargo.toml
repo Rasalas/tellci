@@ -2,6 +2,7 @@
 name = "tellci"
 version = "0.1.1"
 edition = "2024"
+rust-version = "1.85"
 description = "A tiny CLI for writing simple CI feedback as JUnit XML"
 license = "MIT"
 repository = "https://github.com/Rasalas/tellci"

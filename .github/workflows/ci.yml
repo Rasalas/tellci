@@ -53,6 +53,9 @@ jobs:
       - name: Dogfood tellci
         run: ./scripts/ci-tellci.sh
 
+      - name: Verify job summary
+        run: test -s "$GITHUB_STEP_SUMMARY"
+
       - name: Upload tellci JUnit report
         if: always()
         uses: actions/upload-artifact@v7
