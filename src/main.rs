@@ -287,6 +287,8 @@ fn run_command(path: &Path, command: RunCommand) -> Result<u8> {
     }
 }
 
+const MAX_STREAM_CHARS: usize = 8 * 1024;
+
 fn run_details(
     command: &[String],
     exit_code: Option<i32>,
@@ -307,14 +309,14 @@ fn run_details(
         None => body.push_str("Exit code: terminated by signal\n"),
     }
 
-    let stdout = String::from_utf8_lossy(stdout);
+    let stdout = truncate_stream(&String::from_utf8_lossy(stdout));
     if !stdout.is_empty() {
         body.push_str("\nstdout:\n");
         body.push_str(stdout.trim_end());
         body.push('\n');
     }
 
-    let stderr = String::from_utf8_lossy(stderr);
+    let stderr = truncate_stream(&String::from_utf8_lossy(stderr));
     if !stderr.is_empty() {
         body.push_str("\nstderr:\n");
         body.push_str(stderr.trim_end());
@@ -322,6 +324,16 @@ fn run_details(
     }
 
     body
+}
+
+fn truncate_stream(stream: &str) -> String {
+    let trimmed = stream.trim_end();
+    if trimmed.chars().count() <= MAX_STREAM_CHARS {
+        return stream.to_string();
+    }
+
+    let kept: String = trimmed.chars().take(MAX_STREAM_CHARS).collect();
+    format!("{kept}\n[… output truncated]")
 }
 
 fn shell_words(command: &[String]) -> String {
@@ -371,4 +383,24 @@ fn write_github_summary(path: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_streams_pass_through_unchanged() {
+        assert_eq!(truncate_stream("hello\n"), "hello\n");
+    }
+
+    #[test]
+    fn long_streams_are_truncated_with_marker() {
+        let stream = "x".repeat(MAX_STREAM_CHARS + 100);
+        let truncated = truncate_stream(&stream);
+
+        assert!(truncated.starts_with(&"x".repeat(MAX_STREAM_CHARS)));
+        assert!(truncated.ends_with("[… output truncated]"));
+        assert!(truncated.len() < stream.len());
+    }
 }
