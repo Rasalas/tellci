@@ -54,3 +54,10 @@ fi
 "$TELLCI_BIN" run "tellci version command works" --class "Project" -- "$TELLCI_BIN" --version
 
 "$TELLCI_BIN" finish
+
+if [[ -n "${GITHUB_ACTIONS:-}" && -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  if [[ ! -s "${GITHUB_STEP_SUMMARY}" ]]; then
+    echo "tellci: expected a non-empty GitHub step summary" >&2
+    exit 1
+  fi
+fi
